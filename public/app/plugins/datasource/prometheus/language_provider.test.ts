@@ -4,7 +4,26 @@ import LanguageProvider from './language_provider';
 import { PrometheusDatasource } from './datasource';
 import { HistoryItem } from '@grafana/data';
 import { PromQuery } from './types';
+import StreamJSONResponse from './workers/StreamJSONResponse.worker';
+import { MockWorker } from './workers/mocks/StreamJSONResponse.worker';
+
 import Mock = jest.Mock;
+
+jest.mock('./workers/StreamJSONResponse.worker');
+function mockStreamJSONResponse(metrics: string[] = [], metadata: any = {}) {
+  const metricsWorker = new MockWorker(metrics),
+    metadataWorker = new MockWorker(metadata);
+
+  (StreamJSONResponse as Mock)
+    .mockImplementationOnce(() => {
+      return metricsWorker;
+    })
+    .mockImplementationOnce(() => {
+      return metadataWorker;
+    });
+
+  return [metricsWorker, metadataWorker];
+}
 
 describe('Language completion provider', () => {
   const datasource: PrometheusDatasource = ({
@@ -536,9 +555,11 @@ describe('Language completion provider', () => {
   describe('dynamic lookup protection for big installations', () => {
     it('dynamic lookup is enabled if number of metrics is reasonably low', async () => {
       const datasource: PrometheusDatasource = ({
-        metadataRequest: () => ({ data: { data: ['foo'] as string[] } }),
+        // metadataRequest: () => ({ data: { data: ['foo'] as string[] } }),
         getTimeRange: () => ({ start: 0, end: 1 }),
       } as any) as PrometheusDatasource;
+
+      mockStreamJSONResponse(['foo']);
 
       const instance = new LanguageProvider(datasource, { lookupMetricsThreshold: 1 });
       expect(instance.lookupsDisabled).toBeTruthy();
@@ -552,6 +573,8 @@ describe('Language completion provider', () => {
         getTimeRange: () => ({ start: 0, end: 1 }),
       } as any) as PrometheusDatasource;
 
+      mockStreamJSONResponse(['foo', 'bar']);
+
       const instance = new LanguageProvider(datasource, { lookupMetricsThreshold: 1 });
       expect(instance.lookupsDisabled).toBeTruthy();
       await instance.start();
@@ -564,6 +587,8 @@ describe('Language completion provider', () => {
         getTimeRange: jest.fn(() => ({ start: 0, end: 1 })),
       } as any) as PrometheusDatasource;
 
+      const [metricsWorker] = mockStreamJSONResponse(['foo', 'bar']);
+
       const instance = new LanguageProvider(datasource, { lookupMetricsThreshold: 1 });
       const value = Plain.deserialize('{}');
       const ed = new SlateEditor({ value });
@@ -575,14 +600,14 @@ describe('Language completion provider', () => {
         value: valueWithSelection,
       };
       expect(instance.lookupsDisabled).toBeTruthy();
-      expect((datasource.metadataRequest as Mock).mock.calls.length).toBe(0);
+      expect(metricsWorker.postMessage.mock.calls.length).toBe(0);
       await instance.start();
       expect(instance.lookupsDisabled).toBeTruthy();
       // Capture request count to metadata
-      const callCount = (datasource.metadataRequest as Mock).mock.calls.length;
-      expect((datasource.metadataRequest as Mock).mock.calls.length).toBeGreaterThan(0);
+      const callCount = metricsWorker.postMessage.mock.calls.length;
+      expect(metricsWorker.postMessage.mock.calls.length).toBeGreaterThan(0);
       await instance.provideCompletionItems(args);
-      expect((datasource.metadataRequest as Mock).mock.calls.length).toBe(callCount);
+      expect(metricsWorker.postMessage.mock.calls.length).toBe(callCount);
     });
   });
 });

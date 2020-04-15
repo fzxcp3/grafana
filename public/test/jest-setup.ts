@@ -45,6 +45,22 @@ const localStorageMock = (() => {
 
 global.localStorage = localStorageMock;
 
+class WorkerMock {
+  url: string;
+  onmessage: (arg?: any) => void;
+
+  constructor(stringUrl: string) {
+    this.url = stringUrl;
+    this.onmessage = () => {};
+  }
+
+  postMessage(msg: any) {
+    this.onmessage(msg);
+  }
+}
+
+global.Worker = WorkerMock;
+
 const throwUnhandledRejections = () => {
   process.on('unhandledRejection', err => {
     throw err;

@@ -22,6 +22,9 @@ import { DOMUtil, SuggestionsState } from '@grafana/ui';
 import { PrometheusDatasource } from '../datasource';
 import PromQlLanguageProvider from '../language_provider';
 
+// @ts-ignore
+import GroupMetricsByPrefix, { GroupMetricsByPrefixWorker } from './GroupMetricsByPrefix.worker';
+
 const HISTOGRAM_GROUP = '__histograms__';
 const PRISM_SYNTAX = 'promql';
 export const RECORDING_RULES_GROUP = '__recording_rules__';
@@ -238,7 +241,21 @@ class PromQueryField extends React.PureComponent<PromQueryFieldProps, PromQueryF
     onRunQuery();
   };
 
-  onUpdateLanguage = () => {
+  // If this pattern is used again, it should be generalized into some
+  // utility that simply forwards any arguments.
+  groupMetricsByPrefix = (metrics: string[], metricsMetadata: PromMetricsMetadata): Promise<CascaderOption[]> => {
+    return new Promise(resolve => {
+      const groupMetricsWorker = new GroupMetricsByPrefix() as GroupMetricsByPrefixWorker;
+
+      groupMetricsWorker.onmessage = (e: any) => {
+        resolve(e.data);
+      };
+
+      groupMetricsWorker.postMessage({ metrics, metadata: metricsMetadata });
+    });
+  };
+
+  onUpdateLanguage = async () => {
     const {
       histogramMetrics,
       metrics,
@@ -251,7 +268,7 @@ class PromQueryField extends React.PureComponent<PromQueryFieldProps, PromQueryF
     }
 
     // Build metrics tree
-    const metricsByPrefix = groupMetricsByPrefix(metrics, metricsMetadata);
+    const metricsByPrefix = await this.groupMetricsByPrefix(metrics, metricsMetadata);
     const histogramOptions = histogramMetrics.map((hm: any) => ({ label: hm, value: hm }));
     const metricsOptions =
       histogramMetrics.length > 0
@@ -265,7 +282,7 @@ class PromQueryField extends React.PureComponent<PromQueryFieldProps, PromQueryF
     let hint: QueryHint;
     if (lookupsDisabled) {
       hint = {
-        label: `Dynamic label lookup is disabled for datasources with more than ${lookupMetricsThreshold} metrics.`,
+        label: `Metric names are truncated to the first ${lookupMetricsThreshold} and dynamic label lookup is disabled.`,
         type: 'INFO',
       };
     }
